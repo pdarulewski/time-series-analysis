@@ -1,0 +1,442 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+---
+# Task 2
+
+```{r}
+library(ggplot2)
+library(forecast)
+library(latex2exp)
+```
+
+## Question 2.1
+
+### Question 2.1.2
+
+```{r}
+polyroot(c(1, 1, 1, 1))
+```
+
+### Question 2.1.3
+
+```{r}
+df = data.frame()
+
+for (i in 1:10) {
+  sim_y = arima.sim(list(ma=c(1, 1, 1), order = c(0, 0, 3)), n=200, sd = 0.1)
+  sim_x = array(1:200)
+  sim_id = array(rep(i, 200))
+  df = rbind(df, cbind(sim_x, sim_y, sim_id))
+}
+```
+
+
+```{r}
+df$factor_sim_id = factor(df$sim_id)
+p = ggplot(
+  df, aes(x=sim_x, y=sim_y, colour=factor_sim_id)
+) + geom_line() + labs(
+  title = TeX('10 simulations for $X_t$'),
+  x = TeX('$t$'),
+  y = TeX('$X_t$'),
+  colour = 'Index'
+)
+
+p
+
+ggsave(
+  filename = 'plots/simulations_2_1_3.pdf',
+  device = 'pdf',
+  width = 15,
+  height = 5,
+  units = c('in'),
+)
+
+```
+
+
+### Question 2.1.4
+
+```{r}
+df_acf = data.frame()
+
+for (i in 0:9) {
+  acf_data = acf(df$sim_y[df$sim_id == i+1], plot = FALSE, lag.max = 20)$acf
+  lag = array(0:20)
+  sim_id = array(rep(i+1, 21))
+  df_acf = rbind(df_acf, cbind(acf_data, lag, sim_id))
+}
+```
+
+```{r}
+df_acf$factor_sim_id = factor(df_acf$sim_id)
+df_acf$significance_level <- qnorm((1 + 0.95)/2)/sqrt(200)  
+p = ggplot(
+  df_acf,
+  aes(x=lag, y=acf_data, fill=factor_sim_id)
+) +
+  geom_col(position = position_dodge(1)) +
+  geom_hline(aes(yintercept = -significance_level), color = 'blue', linetype = 'dashed', size = 0.4) +
+  geom_hline(aes(yintercept = significance_level), color = 'blue', linetype = 'dashed', size = 0.4) +
+  geom_hline(aes(yintercept = 0)) +
+  labs(
+    title = TeX('ACF for 10 simulations for $X_t$'),
+    x = 'lag',
+    y = 'ACF',
+    fill = 'Index'
+  )
+
+p
+
+ggsave(
+  filename = 'plots/simulations_2_1_4.pdf',
+  device = 'pdf',
+  width = 15,
+  height = 5,
+  units = c('in'),
+)
+```
+### Question 2.1.5
+
+```{r}
+df_pacf = data.frame()
+
+for (i in 0:9) {
+  pacf_data = pacf(df$sim_y[df$sim_id == i + 1], plot = FALSE, lag.max = 20)$acf
+  lag = array(0:19)
+  sim_id = array(rep(i+1, 20))
+  df_pacf = rbind(df_pacf, cbind(pacf_data, lag, sim_id))
+}
+```
+
+```{r}
+df_pacf$factor_sim_id = factor(df_pacf$sim_id)
+df_pacf$significance_level = qnorm((1 + 0.95)/2)/sqrt(200)  
+p = ggplot(
+  df_pacf,
+  aes(x=lag, y=pacf_data, fill=factor_sim_id)
+) +
+  geom_col(position = position_dodge(1)) +
+  geom_hline(aes(yintercept = -significance_level), color = 'blue', linetype = 'dashed', size = 0.4) +
+  geom_hline(aes(yintercept = significance_level), color = 'blue', linetype = 'dashed', size = 0.4) +
+  geom_hline(aes(yintercept = 0)) +
+  labs(
+    title = TeX('PACF for 10 simulations for $X_t$'),
+    x = 'lag',
+    y = 'PACF',
+    fill = 'Index'
+  )
+
+p
+
+ggsave(
+  filename = 'plots/simulations_2_1_5.pdf',
+  device = 'pdf',
+  width = 15,
+  height = 5,
+  units = c('in'),
+)
+```
+
+### Question 2.1.6
+```{r}
+variances = c()
+
+for (i in 1:10) {
+  v = var(df$sim_y[df$sim_id == i])
+  variances = cbind(variances, v)
+}
+
+# variances = variances / 20
+round(t(variances), digits = 4)
+mean(variances)
+```
+
+## Question 2.2
+$$
+(1 − 0.5B + 0.3B^2)(1 − 0.9B^{12})(Y_t − \mu) = \varepsilon_t \\
+\sigma_\varepsilon^2 = 0.5 \\
+\mu = 55
+$$
+
+```{r}
+year = c(2016, 2016, 2016, 2016, 2017, 2017, 2017, 2017, 2017, 2017, 2017, 2017, 2017, 2017, 2017)
+month = c(9, 10, 11, 12, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
+temp = c(46.6, 49.5, 60.3, 59.2, 59.5, 61.9, 59.7, 60.1, 57.8, 49.7, 49.7, 50.1, 48.6, 54.5, 62.3)
+
+sigma = 0.5
+mu = 55
+
+df_heating = data.frame(year, month, temp)
+```
+
+```{r}
+acf_data = acf(df_heating$temp, plot = FALSE, lag.max = 30)$acf
+acf_data = data.frame(acf_data)
+acf_data$significance_level = qnorm((1 + 0.95)/2) / sqrt(15)  
+
+ggplot(
+  acf_data,
+  aes(x=array(0:14), y=acf_data)
+) +
+geom_segment(aes(xend = seq(0, 14), yend = 0)) +
+geom_point(aes(seq(0, 14), acf_data)) +
+geom_hline(aes(yintercept = -significance_level), color = 'blue', linetype = 'dashed', size = 0.4) +
+geom_hline(aes(yintercept = significance_level), color = 'blue', linetype = 'dashed', size = 0.4) +
+geom_hline(aes(yintercept = 0)) +
+labs(
+  title = 'ACF for the heating network model',
+  x = 'lag',
+  y = 'ACF',
+)
+
+ggsave(
+  filename = 'plots/predictions_2_2_acf.pdf',
+  device = 'pdf',
+  width = 5,
+  height = 3,
+  units = c('in'),
+)
+
+pacf_data = pacf(df_heating$temp, plot = FALSE, lag.max = 30)$acf
+pacf_data = data.frame(pacf_data)
+pacf_data$significance_level = qnorm((1 + 0.95)/2) / sqrt(200)  
+
+ggplot(
+  pacf_data,
+  aes(x=array(1:14), y=pacf_data)
+) +
+geom_segment(aes(xend = seq(1, 14), yend = 0)) +
+geom_point(aes(seq(1, 14), pacf_data)) +
+geom_hline(aes(yintercept = -significance_level), color = 'blue', linetype = 'dashed', size = 0.4) +
+geom_hline(aes(yintercept = significance_level), color = 'blue', linetype = 'dashed', size = 0.4) +
+geom_hline(aes(yintercept = 0)) +
+labs(
+  title = 'PACF for the heating network model',
+  x = 'lag',
+  y = 'PACF',
+)
+  
+ggsave(
+  filename = 'plots/predictions_2_2_pacf.pdf',
+  device = 'pdf',
+  width = 5,
+  height = 3,
+  units = c('in'),
+)
+```
+
+```{r}
+arima_model = arima(
+  df_heating$temp,
+  order = c(2, 0, 0),
+  seasonal = list(order = c(1, 0, 0), period = 12),
+  fixed = c(0.5, -0.3, 0.9, mu),
+  include.mean = TRUE
+)
+
+predicted = predict(arima_model, n.ahead = 2)
+fitted = matrix(predicted$pred)
+
+psi = ARMAtoMA(
+  ar = c(0.5, -0.3, rep(0, 9), 0.9),
+  lag.max = 1
+)
+
+psis_sqrt = c(
+  sqrt(sum(c(1)^2)),
+  sqrt(sum(c(1, psi)^2))
+)
+
+ci = qnorm(0.975) * sigma * psis_sqrt
+
+ci_lower = fitted - ci
+ci_upper = fitted + ci
+
+cbind(fitted, ci, ci_lower, ci_upper)
+```
+```{r}
+df_heating_pred = rbind(df_heating, c(2017, 12, fitted[1]), c(2018, 1, fitted[2]))
+ci_lower = c(df_heating$temp, ci_lower)
+ci_upper = c(df_heating$temp, ci_upper)
+df_heating_pred = cbind(df_heating_pred, ci_lower, ci_upper)
+df_heating_pred$date = with(df_heating_pred, sprintf("%d-%02d", year, month))
+
+ggplot(df_heating_pred, aes(date, temp, group=1)) +
+  geom_line() +
+  geom_point() +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.3) +
+  labs(
+    title = paste('Prediction for the next two steps with CI '),
+    x = 'Month',
+    y = 'Temperature') +
+  theme(axis.text.x = element_text(angle=30, hjust=1)) 
+
+ggsave(
+  filename = 'plots/predictions_2_2.pdf',
+  device = 'pdf',
+  width = 6,
+  height = 3,
+  units = c('in'),
+)
+```
+
+## Question 2.3
+
+```{r}
+n = 200
+
+plot_arima = function(arima_model, index) {
+  df = data.frame(matrix(arima_model))
+  colnames(df) = 'arima_model'
+  
+  p_1 = ggplot(
+    df, aes(x=array(1:200), y=arima_model)
+  ) + geom_line() + labs(
+    title = paste('Simulation for model: ', index),
+    x = TeX('$t$'),
+    y = TeX('$X_t$')
+  )
+  
+  ggsave(
+    filename = sprintf('plots/simulations_2_3_%s_p_1.pdf', index),
+    device = 'pdf',
+    width = 5,
+    height = 3,
+    units = c('in'),
+  )
+  
+  acf_data = acf(arima_model, plot = FALSE, lag.max = 30)$acf
+  acf_data = data.frame(acf_data)
+  acf_data$significance_level = qnorm((1 + 0.95)/2) / sqrt(200)  
+  
+  p_2 = ggplot(
+    acf_data,
+    aes(x=array(0:30), y=acf_data)
+  ) +
+  geom_segment(aes(xend = seq(0, 30), yend = 0)) +
+  geom_point(aes(seq(0, 30), acf_data)) +
+  geom_hline(aes(yintercept = -significance_level), color = 'blue', linetype = 'dashed', size = 0.4) +
+  geom_hline(aes(yintercept = significance_level), color = 'blue', linetype = 'dashed', size = 0.4) +
+  geom_hline(aes(yintercept = 0)) +
+  labs(
+    title = paste('ACF for model', index),
+    x = 'lag',
+    y = 'ACF',
+  ) + ylim(-1, 1)
+  
+  ggsave(
+    filename = sprintf('plots/simulations_2_3_%s_p_2.pdf', index),
+    device = 'pdf',
+    width = 5,
+    height = 3,
+    units = c('in'),
+  )
+  
+  pacf_data = pacf(arima_model, plot = FALSE, lag.max = 30)$acf
+  pacf_data = data.frame(pacf_data)
+  pacf_data$significance_level = qnorm((1 + 0.95)/2) / sqrt(200)  
+  
+  p_3 = ggplot(
+    pacf_data,
+    aes(x=array(1:30), y=pacf_data)
+  ) +
+  geom_segment(aes(xend = seq(1, 30), yend = 0)) +
+  geom_point(aes(seq(1, 30), pacf_data)) +
+  geom_hline(aes(yintercept = -significance_level), color = 'blue', linetype = 'dashed', size = 0.4) +
+  geom_hline(aes(yintercept = significance_level), color = 'blue', linetype = 'dashed', size = 0.4) +
+  geom_hline(aes(yintercept = 0)) +
+  labs(
+    title = paste('PACF for model', index),
+    x = 'lag',
+    y = 'PACF',
+  ) + ylim(-1, 1)
+    
+  ggsave(
+    filename = sprintf('plots/simulations_2_3_%s_p_3.pdf', index),
+    device = 'pdf',
+    width = 5,
+    height = 3,
+    units = c('in'),
+  )
+  
+  print(p_1)
+  print(p_2)
+  print(p_3)
+}
+```
+
+### Question 2.3.1
+1. A (1, 0, 0) × (0, 0, 0)12 model with the parameter φ1 = −0.85.
+```{r}
+set.seed(42)
+arima_model = arima.sim(model = list(
+  ar = c(0.85, rep(0, 11))
+), n = n, sd = 0.1)
+plot_arima(arima_model, 1)
+```
+### Question 2.3.2
+2. A (0, 0, 0) × (1, 0, 0)12 model with the parameter Φ1 = 0.85.
+```{r}
+set.seed(42)
+arima_model = arima.sim(model = list(
+  ar = c(rep(0, 11), -0.85)
+), n = n, sd = 0.1)
+plot_arima(arima_model, 2)
+```
+
+### Question 2.3.3
+3. A (1, 0, 0) × (0, 0, 1)12 model with the parameters φ1 = −0.8 and Θ1 = 0.9.
+```{r}
+set.seed(42)
+arima_model = arima.sim(model = list(
+  ar = c(0.8, rep(0, 11)),
+  ma = c(rep(0, 11), 0.9)
+), n = n, sd = 0.1)
+plot_arima(arima_model, 3)
+```
+
+### Question 2.3.4
+4. A (1, 0, 0) × (1, 0, 0)12 model with the parameters φ1 = 0.7 and Φ1 = 0.8.
+```{r}
+set.seed(42)
+arima_model = arima.sim(model = list(
+  ar = c(-0.7, rep(0, 10), -0.8, -0.56)
+), n = n, sd = 0.1)
+plot_arima(arima_model, 4)
+```
+
+### Question 2.3.5
+5. A (2, 0, 0) × (1, 0, 0)12 model with the parameters φ1 = 0.6, φ2 = −0.3, and Φ1 = 0.8.
+```{r}
+set.seed(42)
+arima_model = arima.sim(model = list(
+  ar = c(-0.6, 0.3, rep(0, 9), -0.8, -0.48, 0.24)
+), n = n, sd = 0.1)
+plot_arima(arima_model, 5)
+```
+
+### Question 2.3.6
+6. A (0, 0, 1) × (0, 0, 1)12 model with the parameters θ1 = −0.4 and Θ1 = 0.8.
+```{r}
+set.seed(42)
+arima_model = arima.sim(model = list(
+  ma = c(-0.4, rep(0, 10), 0.8)
+), n = n, sd = 0.1)
+plot_arima(arima_model, 6)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+

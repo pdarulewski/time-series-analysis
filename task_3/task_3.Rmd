@@ -1,0 +1,307 @@
+# Task 3
+
+```{r}
+library(ggplot2)
+library(forecast)
+library(car)
+```
+
+```{r}
+df = read.csv('data/A3_BitcoinTransactions.csv')
+df_size = dim(df)[1]
+
+df$Date = as.Date(df$Date, '%Y-%m-%d')
+
+df[1:3147, 'set'] = 'train'
+df[3148:df_size, 'set'] = 'test'
+
+train = df[df[, 'set'] == 'train',]
+test = df[df[, 'set'] == 'test',]
+```
+
+## Question 3.1
+
+```{r}
+plot_timeseries = function(timeseries, name=NA) {
+  p = ggplot(
+  timeseries,
+  aes(x=Date, y=BitcoinTransactions, colour=set)
+  ) +
+    geom_line() +
+    labs(
+      title = 'Bitcoin Transaction for both sets',
+      x = 'Date',
+      y = 'No. of transactions',
+      colour = 'Type of set'
+    ) + 
+    scale_x_date(date_labels = "%Y %b %d") # + scale_color_manual(values=c("#01BFC4"))
+  
+  if(!is.na(name)){
+    ggsave(
+      filename = name,
+      device = 'pdf',
+      width = 15,
+      height = 5,
+      units = c('in'),
+    )
+  }
+
+  return(p)
+}
+```
+
+```{r}
+plot_timeseries(df, 'plots/3_1_1.pdf')
+```
+
+```{r}
+low = df_size - 700
+plot_timeseries(df[low: df_size,], 'plots/3_1_2.pdf')
+```
+
+## Question 3.2
+
+```{r}
+plot_acf = function(series, name=NA) {
+  acf_df = acf(series, plot = FALSE, lag.max = 60)$acf
+  acf_df = data.frame(acf_df)
+  acf_df$significance_level = qnorm((1 + 0.95)/2) / sqrt(15)  
+  
+  acf_size = dim(acf_df)[1] - 1
+  
+  p = ggplot(
+    acf_df,
+    aes(x=array(0:acf_size), y=acf_df)
+  ) +
+  geom_segment(aes(xend = seq(0, acf_size), yend = 0)) +
+  geom_point(aes(seq(0, acf_size), acf_df)) +
+  geom_hline(aes(yintercept = -significance_level), color = 'blue', linetype = 'dashed', size = 0.4) +
+  geom_hline(aes(yintercept = significance_level), color = 'blue', linetype = 'dashed', size = 0.4) +
+  geom_hline(aes(yintercept = 0)) +
+  labs(
+    title = 'ACF for the Bitcoin transactions',
+    x = 'lag',
+    y = 'ACF',
+  )
+  
+  if (!is.na(name)) {
+    ggsave(
+      filename = name,
+      device = 'pdf',
+      width = 7,
+      height = 3,
+      units = c('in'),
+    )
+  }
+  return(p)
+}
+```
+
+```{r}
+plot_pacf = function(series, name=NA) {
+  pacf_df = pacf(train$BitcoinTransactions, plot = FALSE, lag.max = 60)$acf
+  pacf_df = data.frame(pacf_df)
+  pacf_df$significance_level = qnorm((1 + 0.95)/2) / sqrt(200)  
+  
+  pacf_size = dim(pacf_df)[1]
+  
+  p = ggplot(
+    pacf_df,
+    aes(x=array(1:pacf_size), y=pacf_df)
+  ) +
+  geom_segment(aes(xend = seq(1, pacf_size), yend = 0)) +
+  geom_point(aes(seq(1, pacf_size), pacf_df)) +
+  geom_hline(aes(yintercept = -significance_level), color = 'blue', linetype = 'dashed', size = 0.4) +
+  geom_hline(aes(yintercept = significance_level), color = 'blue', linetype = 'dashed', size = 0.4) +
+  geom_hline(aes(yintercept = 0)) +
+  labs(
+    title = 'PACF for the Bitcoin transactions',
+    x = 'lag',
+    y = 'PACF',
+  )
+
+  if (!is.na(name)) {
+    ggsave(
+      filename = name,
+      device = 'pdf',
+      width = 7,
+      height = 3,
+      units = c('in'),
+    )
+  }
+
+  return(p)
+}
+```
+
+```{r}
+plot_acf(train$BitcoinTransactions, 'plots/3_2_1_acf.pdf')
+plot_pacf(train$BitcoinTransactions, 'plots/3_2_1_pacf.pdf')
+```
+
+```{r}
+Box.test(train$BitcoinTransactions, lag=60, type="Ljung-Box")
+```
+
+```{r}
+train_diff = data.frame(train)
+train_diff = train_diff[2:dim(train_diff)[1],]
+train_diff$BitcoinTransactions = diff(train$BitcoinTransactions)
+plot_timeseries(train_diff, 'plots/3_2_2.pdf')
+plot_acf(train_diff$BitcoinTransactions, 'plots/3_2_2_acf.pdf')
+plot_pacf(train_diff$BitcoinTransactions, 'plots/3_2_2_pacf.pdf')
+```
+
+```{r}
+train_diff_2 = data.frame(train)
+train_diff_2 = train_diff_2[9:dim(train_diff_2)[1],]
+
+train_diff_2$BitcoinTransactions = diff(diff(train$BitcoinTransactions), lag=7)
+
+plot_timeseries(train_diff_2, 'plots/3_2_3.pdf')
+plot_acf(train_diff_2$BitcoinTransactions, 'plots/3_2_3_acf.pdf')
+plot_pacf(train_diff_2$BitcoinTransactions, 'plots/3_2_3_pacf.pdf')
+```
+
+```{r}
+transform = function(name, x) {
+  if (name == 'log') {
+      return(log(x))
+  } else if (name == 'sqrt') {
+      return(sqrt(x))
+  } else if (name == 'square') {
+      return(x^2)
+  } else if (name == 'inverse') {
+      return(1/x)
+  } else if (name == 'pass') {
+      return(x)
+  }
+}
+```
+
+```{r}
+order = c(0, 2, 2)
+seasonal_order = c(0, 1, 1)
+transformation = 'sqrt'
+train_size = length(train$BitcoinTransactions)
+# low = 1
+low = train_size - 700
+
+file_name = paste(
+  paste(order, collapse=''),
+  paste(seasonal_order, collapse = ''),
+  low,
+  transformation,
+  sep = '_'
+)
+
+model_data = transform(
+  transformation,
+  train$BitcoinTransactions[low: train_size]
+)
+  
+model = arima(
+  x = model_data,
+  order = order,
+  seasonal = list(
+    order = seasonal_order,
+    period = 7
+  )
+)
+
+print(model)
+print(AIC(model))
+print(BIC(model))
+
+r = residuals(model)
+
+binom.test(
+  sum(diff(sign(r)) != 0),
+  length(r) - 1
+)
+
+# pdf(file = paste('plots/tsdiag_', file_name, '.pdf', sep=''))
+tsdiag(model)
+# dev.off()
+
+plot_acf(r)
+plot_pacf(r)
+
+# pdf(file =  paste('plots/qq_plot_', file_name, '.pdf', sep=''))
+qqPlot(r, col.lines = '#01BFC4')
+# dev.off()
+
+df_r = data.frame(seq(1, length(r)), r)
+names(df_r) = c('index', 'value')
+
+p = ggplot(df_r) +
+  geom_point(aes(x = index, y = value), alpha = 0.3, colour = '#01BFC4', size=2) +
+  labs(
+    title = 'Residuals',
+    x = 'Index',
+    y = 'Value'
+  )
+
+ggsave(
+  filename =  paste('plots/residuals_', file_name, '.pdf', sep=''),
+  device = 'pdf',
+  width = 7,
+  height = 3,
+  units = c('in'),
+)
+
+q = ggplot(r, aes(x = r)) + 
+  geom_histogram(aes(y = ..density..), colour = 'black', fill = 'white') +
+  geom_density(alpha = .2, fill = '#01BFC4') + 
+  labs(
+    title = 'Residuals distribution',
+    x = 'Bin',
+    y = 'Amount '
+  )
+
+ggsave(
+  filename = paste('plots/histogram_', file_name, '.pdf', sep=''),
+  device = 'pdf',
+  width = 7,
+  height = 3,
+  units = c('in'),
+)
+
+p
+q
+```
+
+
+```{r}
+model_forecast = forecast(model, h=61, level=c(95))
+
+predictions = c(rep(NA, length(model_forecast$x)), model_forecast$mean ^ 2)
+actual = c(model_forecast$x ^ 2, test$BitcoinTransactions)
+lower = c(model_forecast$x ^ 2, model_forecast$lower ^ 2)
+upper = c(model_forecast$x ^ 2, model_forecast$upper ^ 2)
+
+df_pred = data.frame(tail(df$Date, 762), actual, predictions, lower, upper, tail(df$set, 762))
+names(df_pred) = c('Date', 'actual', 'predictions', 'lower', 'upper')
+
+p = ggplot(tail(df_pred, 180)) +
+  geom_line(aes(x = Date, y = predictions, color='Predicted')) +
+  geom_line(aes(x = Date, y = actual, color='Actual')) +
+  geom_ribbon(data=tail(df_pred, 180), aes(x = Date, y = predictions, ymin = lower, ymax = upper), alpha = 0.2) +
+  
+  labs(
+    title = paste('Prediction for Bitcoin Transactions'),
+    x = 'Date',
+    y = 'Number of Bitcoin Transactions',
+    colour = 'Type') + 
+    scale_x_date(date_labels = "%Y %b %d")
+
+ggsave(
+  filename = 'plots/3_5.pdf',
+  device = 'pdf',
+  width = 15,
+  height = 5,
+  units = c('in'),
+)
+
+p
+```

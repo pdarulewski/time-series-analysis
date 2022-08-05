@@ -1,0 +1,396 @@
+# Task 1
+
+```{r}
+library(ggplot2)
+library(magic)
+library(data.table)
+```
+
+## Question 1.1
+```{r}
+df = get(load('data/DataA1.RData'))
+
+DRIVER_ID = 9
+```
+
+```{r}
+df$outliers = 'Regular lap'
+df$outliers[df$pitstop_lagged == 1] = 'Pit stop previous'
+df$outliers[df$pitstop == TRUE] = 'Pit stop current'
+df$outliers[df$lap_number == 1] = 'First lap'
+
+p = ggplot(
+  df[df[, 'driverId'] == DRIVER_ID,],
+  aes(lap_number, lap_time, colour=outliers)
+) + geom_point() + labs(
+  title = paste('Lap times for driver no. ', DRIVER_ID),
+  x = 'Lap number',
+  y = 'Lap time [ms]',
+  colour = 'Type of lap'
+)
+
+p
+
+ggsave(
+  filename = 'plots/lap_times.pdf',
+  device = 'pdf',
+  width = 10,
+  height = 4,
+  units = c('in'),
+)
+```
+
+## Question 1.2
+### Question 1.2.1
+$$
+    Y_i = \alpha_i
+    + \beta_{1} X_{i}^{lap\ number}
+    + \beta_{2} X_{i}^{first\ lap}
+    + \beta_{3} X_{i}^{pit\ stop}
+    + \beta_{4} X_{i}^{pitstop\ lagged}
+    + \varepsilon_i
+$$
+```{r}
+alphas = matrix(0, ncol=max(df$driverId), nrow=dim(df)[1])
+
+for (i in seq(1, max(df$driverId), 1)) {
+  alphas[df$driverId == i, i] = 1
+}
+
+df$first_lap = ifelse(df$lap_number == 1, 1, 0)
+df$pitstop = ifelse(df$pitstop == TRUE, 1, 0)
+
+x = data.frame(cbind(
+  df$lap_number,
+  df$first_lap,
+  df$pitstop,
+  df$pitstop_lagged
+))
+
+setnames(
+  x,
+  old = c('X1','X2', 'X3', 'X4'),
+  new = c('lap_number','first_lap', 'pitstop', 'pitstop_lagged'),
+)
+
+y = df$lap_time
+
+x = cbind(alphas, x)
+```
+
+### Question 1.2.2
+```{r}
+x_train = data.matrix(x[x$lap_number <= 51, ])
+y_train = y[x$lap_number <= 51]
+
+x_test = data.matrix(x[x$lap_number > 51, ])
+y_test = y[x$lap_number > 51]
+
+x_test_9 = data.matrix(x[x$lap_number > 51 & df$driverId == 9, ])
+y_test_9 = y[x$lap_number > 51 & df$driverId == 9]
+```
+
+### Question 1.2.3
+```{r}
+theta = solve(
+  t(x_train) %*% x_train,
+  t(x_train) %*% y_train
+)
+
+epsilon = y_train - x_train %*% theta
+sigma_2 = t(epsilon) %*% epsilon / (length(y_train) - 5)
+print(round(theta, digits = 2))
+print(round(sqrt(sigma_2), digits = 2))
+```
+
+
+### Question 1.2.4
+
+```{r}
+variance = as.numeric(sigma_2) * (solve(t(x_train) %*% x_train))
+t = qt(0.95, df = length(y_train) - 25) * sqrt(diag(variance))
+print(round(cbind(theta, t, theta - t, theta + t), digits = 2))
+print(round(sqrt(sigma_2), digits = 2))
+```
+
+### Question 1.2.6
+
+```{r}
+y_pred = x_test_9 %*% theta
+t = qt(0.95, df = length(y_train) - 5) * c(sqrt(sigma_2)) * sqrt(
+    1 + diag(x_test_9 %*% solve(t(x_train) %*% x_train) %*% t(x_test_9))
+)
+
+print(round(cbind(y_pred, t, y_pred - t, y_pred + t), digits = 2))
+```
+
+### Question 1.2.7
+
+```{r}
+df_train = data.frame(cbind(x_train, y_train))
+names(df_train)[names(df_train) == 'y_train'] <- 'lap_time'
+df_train$set = 'Training'
+ci_lower_train = df_train$lap_time - qnorm(0.95) * sd(df_train$lap_time) / sqrt(length(df_train))
+ci_upper_train = df_train$lap_time + qnorm(0.95) * sd(df_train$lap_time) / sqrt(length(df_train))
+
+df_train$ci_lower = ci_lower_train
+df_train$ci_upper = ci_upper_train
+
+df_test = data.frame(cbind(x_test, y_test))
+names(df_test)[names(df_test) == 'y_test'] <- 'lap_time'
+df_test$set = 'Testing'
+ci_lower_test = df_test$lap_time - qnorm(0.95) * sd(df_train$lap_time) / sqrt(length(df_train))
+ci_upper_test = df_test$lap_time + qnorm(0.95) * sd(df_train$lap_time) / sqrt(length(df_train))
+
+df_test$ci_lower = ci_lower_test
+df_test$ci_upper = ci_upper_test
+
+df_train = df_train[df_train$X9 == 1, ]
+df_test = df_test[df_test$X9 == 1, ]
+
+df_pred = data.frame(df_test)
+df_pred$lap_time = y_pred
+df_pred$ci_lower = y_pred - t
+df_pred$ci_upper = y_pred + t
+df_pred$set = 'Predicted'
+
+plot_data = do.call("rbind", list(df_train, df_test, df_pred))
+names(plot_data)[names(plot_data) == 'V22'] <- 'lap_number'
+```
+
+```{r}
+p = ggplot(plot_data, aes(lap_number, lap_time, colour=set)) +
+  geom_point() +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.1) + labs(
+  title = paste('Confidence intervals for training data and predictions for driver no. ', DRIVER_ID),
+  x = 'Lap number',
+  y = 'Lap time [ms]',
+  colour = 'Set'
+)
+
+p
+
+ggsave(
+  filename = 'plots/lap_times_pred.pdf',
+  device = 'pdf',
+  width = 10,
+  height = 4,
+  units = c('in'),
+)
+```
+
+```{r}
+array(y_pred)
+```
+
+## Question 1.3
+### Question 1.3.2
+```{r}
+create_covariance_matrix = function(x, rho_value) {
+  laps_per_driver <- c()
+
+  for (k in unique(df$driverId)) {
+    laps_per_driver <- c(laps_per_driver,sum(df$driverId == k))
+  }
+  
+  laps_per_driver_train <- pmin(laps_per_driver, 51)
+  
+  rho = array(rep(rho_value, 51))
+  
+  sigma <- matrix(0, ncol=0, nrow=0)
+
+  for (k in seq_along(laps_per_driver_train)) {
+    N <- laps_per_driver_train[k]
+    O <- matrix(data = rep(0:(N - 1), N), ncol=N)
+    pow <- abs(t(O) - O)
+    block <- rho[k] ^ pow
+    sigma <- adiag(sigma, block)
+  }
+  
+  return(sigma)
+}
+```
+
+### Question 1.3.3
+```{r}
+sigma = create_covariance_matrix(x, 0.5)
+theta = solve(
+  t(x_train) %*% solve(sigma) %*% x_train,
+  t(x_train) %*% solve(sigma) %*% y_train
+)
+
+epsilon = y_train - x_train %*% theta
+sigma_2 = t(epsilon) %*% epsilon / (length(y_train) - 5)
+
+variance = as.numeric(sigma_2) * solve(t(x_train) %*% x_train)
+t = qt(0.95, df = length(y_train) - 5) * sqrt(diag(variance))
+print(round(cbind(theta, t, theta - t, theta + t), digits = 2))
+print(round(sqrt(sigma_2), digits = 2))
+```
+
+### Question 1.3.5
+```{r}
+gamma = 1.5
+
+first_lap = x_train[, 23]
+pitstop = x_train[, 24]
+pitstop_lagged = x_train[, 25]
+
+sigma_1 = sigma * (gamma ^ outer(first_lap, first_lap, FUN="+"))
+sigma = sigma * (gamma ^ outer(pitstop, pitstop, FUN="+"))
+sigma = sigma * (gamma ^ outer(pitstop_lagged, pitstop_lagged, FUN="+"))
+```
+
+```{r}
+theta = solve(
+  t(x_train) %*% solve(sigma) %*% x_train,
+  t(x_train) %*% solve(sigma) %*% y_train
+)
+
+epsilon = y_train - x_train %*% theta
+sigma_2 = t(epsilon) %*% solve(sigma) %*% epsilon / (length(y_train) - 5)
+
+variance = as.numeric(sigma_2) * solve(t(x_train) %*% x_train)
+t = qt(0.95, df = length(y_train) - 5) * sqrt(diag(variance))
+
+print(round(cbind(theta, t, theta - t, theta + t), digits = 2))
+print(round(sqrt(sigma_2), digits = 2))
+```
+
+## Question 1.4
+
+### Question 1.4.1
+```{r}
+rho = array(rep(0, 5))
+var = array(rep(0, 5))
+std = array(rep(0, 5))
+
+gamma_first_lap = array(rep(0, 5))
+gamma_pitstop = array(rep(0, 5))
+gamma_pitstop_lag = array(rep(0, 5))
+
+sigma = diag(dim(sigma)[1])
+
+mask_first_lap = first_lap == 0
+mask_pitstop = pitstop == 0
+mask_pitstop_lag = pitstop_lagged == 0
+mask_normal_lap = mask_first_lap & mask_pitstop & mask_pitstop_lag
+
+std_error = function(epsilons) {
+  return(sqrt(
+    sum(epsilons ^ 2) / (length(epsilons))
+  ))
+}
+```
+
+```{r}
+for (i in 1:5) {
+  sigma_inv = solve(sigma)
+  theta = solve(
+    t(x_train) %*% sigma_inv %*% x_train,
+    t(x_train) %*% sigma_inv %*% y_train
+  )
+  
+  epsilon = y_train - x_train %*% theta
+  
+  normal_lap_weight = std_error(epsilon[mask_normal_lap])
+  
+  gamma_first_lap[i] = std_error(epsilon[!mask_first_lap]) / normal_lap_weight
+  gamma_pitstop[i] = std_error(epsilon[!mask_pitstop]) / normal_lap_weight
+  gamma_pitstop_lag[i] = std_error(epsilon[!mask_pitstop_lag]) / normal_lap_weight
+  
+  rho[i] = cor(epsilon[-1], epsilon[-length(epsilon)])
+  sigma = create_covariance_matrix(x, rho[i])
+  
+  sigma = sigma * (gamma_first_lap[i] ^ outer(first_lap, first_lap, FUN="+"))
+  sigma = sigma * (gamma_pitstop[i] ^ outer(pitstop, pitstop, FUN="+"))
+  sigma = sigma * (gamma_pitstop_lag[i] ^ outer(pitstop_lagged, pitstop_lagged, FUN="+"))
+}
+```
+
+### Question 1.4.2
+```{r}
+round(rho, digits = 4)
+round(gamma_first_lap, digits = 4)
+round(gamma_pitstop, digits = 4)
+round(gamma_pitstop_lag, digits = 4)
+```
+
+```{r}
+theta = solve(
+  t(x_train) %*% solve(sigma) %*% x_train,
+  t(x_train) %*% solve(sigma) %*% y_train
+)
+
+epsilon = y_train - x_train %*% theta
+sigma_2 = t(epsilon) %*% solve(sigma) %*% epsilon / (length(y_train) - 5)
+
+variance = as.numeric(sigma_2) * solve(t(x_train) %*% x_train)
+t = qt(0.95, df = length(y_train) - 5) * sqrt(diag(variance))
+
+print(round(cbind(theta, t, theta - t, theta + t), digits = 2))
+print(round(sqrt(sigma_2), digits = 2))
+```
+
+### Question 1.4.3
+```{r}
+y_pred = x_test_9 %*% theta
+t = qt(0.95, df = length(y_train) - 5) * c(sqrt(sigma_2)) * sqrt(
+    1 + diag(x_test_9 %*% solve(t(x_train) %*% x_train) %*% t(x_test_9))
+)
+
+print(round(cbind(y_pred, t, y_pred - t, y_pred + t), digits = 2))
+```
+
+### Question 1.4.4
+```{r}
+df_train = data.frame(cbind(x_train, y_train))
+names(df_train)[names(df_train) == 'y_train'] <- 'lap_time'
+df_train$set = 'Training'
+ci_lower_train = df_train$lap_time - qnorm(0.95) * sd(df_train$lap_time) / sqrt(length(df_train))
+ci_upper_train = df_train$lap_time + qnorm(0.95) * sd(df_train$lap_time) / sqrt(length(df_train))
+
+df_train$ci_lower = ci_lower_train
+df_train$ci_upper = ci_upper_train
+
+df_test = data.frame(cbind(x_test, y_test))
+names(df_test)[names(df_test) == 'y_test'] <- 'lap_time'
+df_test$set = 'Testing'
+ci_lower_test = df_test$lap_time - qnorm(0.95) * sd(df_train$lap_time) / sqrt(length(df_train))
+ci_upper_test = df_test$lap_time + qnorm(0.95) * sd(df_train$lap_time) / sqrt(length(df_train))
+
+df_test$ci_lower = ci_lower_test
+df_test$ci_upper = ci_upper_test
+
+df_train = df_train[df_train$X9 == 1, ]
+df_test = df_test[df_test$X9 == 1, ]
+
+df_pred = data.frame(df_test)
+df_pred$lap_time = y_pred
+
+df_pred$ci_lower = y_pred - t
+df_pred$ci_upper = y_pred + t
+df_pred$set = 'Predicted'
+
+plot_data = do.call("rbind", list(df_train, df_test, df_pred))
+names(plot_data)[names(plot_data) == 'V22'] <- 'lap_number'
+
+p = ggplot(plot_data, aes(lap_number, lap_time, colour=set)) +
+  geom_point() +
+  geom_ribbon(aes(ymin = ci_lower, ymax = ci_upper), alpha = 0.1) + labs(
+  title = paste('Confidence intervals for training data and predictions for driver no. ', DRIVER_ID),
+  x = 'Lap number',
+  y = 'Lap time [ms]',
+  colour = 'Set'
+)
+
+p
+
+ggsave(
+  filename = 'plots/lap_times_pred_wls.pdf',
+  device = 'pdf',
+  width = 10,
+  height = 4,
+  units = c('in'),
+)
+```

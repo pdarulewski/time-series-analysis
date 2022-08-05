@@ -1,0 +1,921 @@
+# Task 4
+
+```{r}
+library(ggplot2)
+library(forecast)
+library(marima)
+library(zoo)
+library(car)
+library(reshape2)
+```
+
+## Question 4.1
+
+```{r}
+df = read.csv('data/A4_data.csv')
+df_size = dim(df)[1]
+df_train_size = df_size - 3
+```
+
+```{r}
+df$Date = as.Date(as.yearqtr(df$Date, format = "%Y Q%q"))
+
+df[1:df_train_size, 'set'] = 'train'
+df[df_train_size:df_size, 'set'] = 'test'
+
+train = df[df[, 'set'] == 'train',]
+test = df[df[, 'set'] == 'test',]
+
+head(train, 5)
+```
+
+```{r}
+p = ggplot(melt(df[, 1:5], id = 'Date'), aes(x = Date, y = value, colour = variable)) +
+  geom_line() +
+  labs(
+    title = 'Apartment prices for postcodes',
+    x = 'Date',
+    y = 'Price',
+    colour = 'Postcode'
+  ) + 
+  scale_x_date(date_labels = "%Y %b %d")
+
+ggsave(
+  filename = 'plots/prices.pdf',
+  device = 'pdf',
+  width = 15,
+  height = 5,
+  units = c('in'),
+)
+
+p
+```
+
+```{r}
+p = ggplot(melt(df[, c(1, 6)], id = 'Date'), aes(x = Date, y = value, colour = variable)) +
+  geom_line() +
+  labs(
+    title = 'CPI value over time',
+    x = 'Date',
+    y = 'Value',
+    colour = 'Variable'
+  ) + 
+  scale_x_date(date_labels = "%Y %b %d")
+
+ggsave(
+  filename = 'plots/cpi.pdf',
+  device = 'pdf',
+  width = 15,
+  height = 5,
+  units = c('in'),
+)
+
+p
+```
+
+```{r}
+p = ggplot(melt(df[, c(1, 7:8)], id = 'Date'), aes(x = Date, y = value, colour = variable)) +
+  geom_line() +
+  labs(
+    title = 'Interest rates over time',
+    x = 'Date',
+    y = 'Value',
+    colour = 'Variable'
+  ) + 
+  scale_x_date(date_labels = "%Y %b %d")
+
+ggsave(
+  filename = 'plots/rates.pdf',
+  device = 'pdf',
+  width = 15,
+  height = 5,
+  units = c('in'),
+)
+
+p
+```
+
+Rising prices trend for every postcode, as well as CPI. Interest rates are decreasing. Not very random, because of the bump between 2006-2008. Differentiation needed.
+
+## Question 4.2
+
+```{r}
+plot_acf = function(series, title, name=NA) {
+  acf_df = acf(series, plot = FALSE, lag.max = 60)$acf
+  acf_df = data.frame(acf_df)
+  acf_size = dim(acf_df)[1] - 1
+  acf_df$significance_level = qnorm((1 + 0.95)/2) / sqrt(acf_size)  
+  
+  p = ggplot(
+    acf_df,
+    aes(x=array(0:acf_size), y=acf_df)
+  ) +
+  geom_segment(aes(xend = seq(0, acf_size), yend = 0)) +
+  geom_point(aes(seq(0, acf_size), acf_df)) +
+  geom_hline(aes(yintercept = -significance_level), color = 'blue', linetype = 'dashed', size = 0.4) +
+  geom_hline(aes(yintercept = significance_level), color = 'blue', linetype = 'dashed', size = 0.4) +
+  geom_hline(aes(yintercept = 0)) +
+  labs(
+    title = title,
+    x = 'lag',
+    y = 'ACF',
+  )
+  
+  if (!is.na(name)) {
+    ggsave(
+      filename = name,
+      device = 'pdf',
+      width = 7,
+      height = 3,
+      units = c('in'),
+    )
+  }
+  return(p)
+}
+```
+
+```{r}
+plot_pacf = function(series, title, name=NA) {
+  pacf_df = pacf(series, plot = FALSE, lag.max = 60)$acf
+  pacf_df = data.frame(pacf_df)
+  pacf_size = dim(pacf_df)[1]
+  pacf_df$significance_level = qnorm((1 + 0.95)/2) / sqrt(pacf_size)  
+  
+  p = ggplot(
+    pacf_df,
+    aes(x=array(1:pacf_size), y=pacf_df)
+  ) +
+  geom_segment(aes(xend = seq(1, pacf_size), yend = 0)) +
+  geom_point(aes(seq(1, pacf_size), pacf_df)) +
+  geom_hline(aes(yintercept = -significance_level), color = 'blue', linetype = 'dashed', size = 0.4) +
+  geom_hline(aes(yintercept = significance_level), color = 'blue', linetype = 'dashed', size = 0.4) +
+  geom_hline(aes(yintercept = 0)) +
+  labs(
+    title = title,
+    x = 'lag',
+    y = 'PACF',
+  )
+
+  if (!is.na(name)) {
+    ggsave(
+      filename = name,
+      device = 'pdf',
+      width = 7,
+      height = 3,
+      units = c('in'),
+    )
+  }
+
+  return(p)
+}
+```
+
+```{r}
+plot_ccf = function(series_1, series_2, title, name=NA) {
+  ccf_df = ccf(series_1, series_2, plot = FALSE, lag.max = 15)$acf
+  ccf_df = data.frame(ccf_df)
+  ccf_size = dim(ccf_df)[1]
+  ccf_df$significance_level = qnorm((1 + 0.95)/2) / sqrt(ccf_size)  
+  
+  low = -floor(ccf_size/2)
+  up = -1 * low
+  
+  p = ggplot(
+    ccf_df,
+    aes(x=array(low:up), y=ccf_df)
+  ) +
+  geom_segment(aes(xend = seq(low, up), yend = 0)) +
+  geom_point(aes(seq(low, up), ccf_df)) +
+  geom_hline(aes(yintercept = -significance_level), color = 'blue', linetype = 'dashed', size = 0.4) +
+  geom_hline(aes(yintercept = significance_level), color = 'blue', linetype = 'dashed', size = 0.4) +
+  geom_hline(aes(yintercept = 0)) +
+  labs(
+    title = title,
+    x = 'lag',
+    y = 'CCF',
+  )
+
+  if (!is.na(name)) {
+    ggsave(
+      filename = name,
+      device = 'pdf',
+      width = 7,
+      height = 3,
+      units = c('in'),
+    )
+  }
+
+  return(p)
+}
+```
+
+```{r}
+plot_acf (train$z2000,  'ACF for postcode 2000',  'plots/acf_z2000.pdf')
+plot_pacf(train$z2000, 'PACF for postcode 2000', 'plots/pacf_z2000.pdf')
+
+plot_acf (train$z2800,  'ACF for postcode 2800',  'plots/acf_z2800.pdf')
+plot_pacf(train$z2800, 'PACF for postcode 2800', 'plots/pacf_z2800.pdf')
+
+plot_acf (train$z4000,  'ACF for postcode 4000',  'plots/acf_z4000.pdf')
+plot_pacf(train$z4000, 'PACF for postcode 4000', 'plots/pacf_z4000.pdf')
+
+plot_acf (train$z4200,  'ACF for postcode 4200',  'plots/acf_z4200.pdf')
+plot_pacf(train$z4200, 'PACF for postcode 4200', 'plots/pacf_z4200.pdf')
+
+plot_acf (train$CPI,  'ACF for CPI',  'plots/acf_cpi.pdf')
+plot_pacf(train$CPI, 'PACF for CPI', 'plots/pacf_cpi.pdf')
+
+plot_acf (train$obl30yr,  'ACF for obl30yr',  'plots/acf_obl30yr.pdf')
+plot_pacf(train$obl30yr, 'PACF for obl30yr', 'plots/pacf_obl30yr.pdf')
+
+plot_acf (train$nat_tres_lend_rate,  'ACF for nat_tres_lend_rate',  'plots/acf_nat_tres_lend_rate.pdf')
+plot_pacf(train$nat_tres_lend_rate, 'PACF for nat_tres_lend_rate', 'plots/pacf_nat_tres_lend_rate.pdf')
+
+plot_ccf(train$z2000, train$z2800, 'CCF between 2000 and 2800', 'plots/ccf_2000_2800.pdf')
+plot_ccf(train$z2000, train$z4000, 'CCF between 2000 and 4000', 'plots/ccf_2000_4000.pdf')
+plot_ccf(train$z2000, train$z4200, 'CCF between 2000 and 4200', 'plots/ccf_2000_4200.pdf')
+
+plot_ccf(train$z2800, train$z4000, 'CCF between 2800 and 4000', 'plots/ccf_2800_4000.pdf')
+plot_ccf(train$z2800, train$z4200, 'CCF between 2800 and 4200', 'plots/ccf_2800_4200.pdf')
+
+plot_ccf(train$z4000, train$z4200, 'CCF between 4000 and 4200', 'plots/ccf_4000_4200.pdf')
+```
+
+```{r}
+train_diff = data.frame(train)
+train_diff = train_diff[2:dim(train_diff)[1],]
+
+train_diff$z2000              = diff(train$z2000)
+train_diff$z2800              = diff(train$z2800)
+train_diff$z4000              = diff(train$z4000)
+train_diff$z4200              = diff(train$z4200)
+train_diff$CPI                = diff(train$CPI)
+train_diff$obl30yr            = diff(train$obl30yr)
+train_diff$nat_tres_lend_rate = diff(train$nat_tres_lend_rate)
+```
+
+```{r}
+p = ggplot(melt(train_diff[, 1:5], id = 'Date'), aes(x = Date, y = value, colour = variable)) +
+  geom_line() +
+  labs(
+    title = 'Apartment prices for postcodes',
+    x = 'Date',
+    y = 'Price',
+    colour = 'Postcode'
+  ) + 
+  scale_x_date(date_labels = "%Y %b %d")
+
+ggsave(
+  filename = 'plots/prices_diff.pdf',
+  device = 'pdf',
+  width = 15,
+  height = 5,
+  units = c('in'),
+)
+
+q = ggplot(melt(train_diff[, c(1, 6:8)], id = 'Date'), aes(x = Date, y = value, colour = variable)) +
+  geom_line() +
+  labs(
+    title = 'Interest rates and CPI',
+    x = 'Date',
+    y = 'Value',
+    colour = 'Variable'
+  ) + 
+  scale_x_date(date_labels = "%Y %b %d")
+
+ggsave(
+  filename = 'plots/rates_diff.pdf',
+  device = 'pdf',
+  width = 15,
+  height = 5,
+  units = c('in'),
+)
+
+p
+q
+```
+
+```{r}
+train_log_diff = data.frame(train)
+train_log_diff = train_diff[2:dim(train_log_diff)[1],]
+
+train_log_diff$z2000              = diff(log(train$z2000))
+train_log_diff$z2800              = diff(log(train$z2800))
+train_log_diff$z4000              = diff(log(train$z4000))
+train_log_diff$z4200              = diff(log(train$z4200))
+train_log_diff$CPI                = diff(log(train$CPI))
+train_log_diff$obl30yr            = diff(log(train$obl30yr))
+train_log_diff$nat_tres_lend_rate = diff(log(train$nat_tres_lend_rate))
+```
+
+```{r}
+p = ggplot(melt(train_log_diff[, 1:5], id = 'Date'), aes(x = Date, y = value, colour = variable)) +
+  geom_line() +
+  labs(
+    title = 'Apartment prices for postcodes',
+    x = 'Date',
+    y = 'Price',
+    colour = 'Postcode'
+  ) + 
+  scale_x_date(date_labels = "%Y %b %d")
+
+ggsave(
+  filename = 'plots/prices_diff.pdf',
+  device = 'pdf',
+  width = 15,
+  height = 5,
+  units = c('in'),
+)
+
+q = ggplot(melt(train_log_diff[, c(1, 6:8)], id = 'Date'), aes(x = Date, y = value, colour = variable)) +
+  geom_line() +
+  labs(
+    title = 'Interest rates and CPI',
+    x = 'Date',
+    y = 'Value',
+    colour = 'Variable'
+  ) + 
+  scale_x_date(date_labels = "%Y %b %d")
+
+ggsave(
+  filename = 'plots/rates_diff.pdf',
+  device = 'pdf',
+  width = 15,
+  height = 5,
+  units = c('in'),
+)
+
+p
+q
+```
+
+```{r}
+plot_acf (train_log_diff$z2000,  'ACF log diff for postcode 2000',  'plots/acf_log_diff_z2000.pdf')
+plot_pacf(train_log_diff$z2000, 'PACF log diff for postcode 2000', 'plots/pacf_log_diff_z2000.pdf')
+
+plot_acf (train_log_diff$z2800,  'ACF log diff for postcode 2800',  'plots/acf_log_diff_z2800.pdf')
+plot_pacf(train_log_diff$z2800, 'PACF log diff for postcode 2800', 'plots/pacf_log_diff_z2800.pdf')
+
+plot_acf (train_log_diff$z4000,  'ACF log diff for postcode 4000',  'plots/acf_log_diff_z4000.pdf')
+plot_pacf(train_log_diff$z4000, 'PACF log diff for postcode 4000', 'plots/pacf_log_diff_z4000.pdf')
+
+plot_acf (train_log_diff$z4200,  'ACF log diff for postcode 4200',  'plots/acf_log_diff_z4200.pdf')
+plot_pacf(train_log_diff$z4200, 'PACF log diff for postcode 4200', 'plots/pacf_log_diff_z4200.pdf')
+
+plot_acf (train_log_diff$CPI,  'ACF log diff for CPI',  'plots/acf_log_diff_cpi.pdf')
+plot_pacf(train_log_diff$CPI, 'PACF log diff for CPI', 'plots/pacf_log_diff_cpi.pdf')
+
+plot_acf (train_log_diff$obl30yr,  'ACF log diff for obl30yr',  'plots/acf_log_diff_obl30yr.pdf')
+plot_pacf(train_log_diff$obl30yr, 'PACF log diff for obl30yr', 'plots/pacf_log_diff_obl30yr.pdf')
+
+plot_acf (train_log_diff$nat_tres_lend_rate,  'ACF log diff for nat_tres_lend_rate',  'plots/acf_log_diff_nat_tres_lend_rate.pdf')
+plot_pacf(train_log_diff$nat_tres_lend_rate, 'PACF log diff for nat_tres_lend_rate', 'plots/pacf_log_diff_nat_tres_lend_rate.pdf')
+
+plot_ccf (train_log_diff$z2000, train_log_diff$z2800, 'CCF log diff between 2000 and 2800', 'plots/ccf_log_diff_2000_2800.pdf')
+plot_ccf (train_log_diff$z2000, train_log_diff$z4000, 'CCF log diff between 2000 and 4000', 'plots/ccf_log_diff_2000_4000.pdf')
+plot_ccf (train_log_diff$z2000, train_log_diff$z4200, 'CCF log diff between 2000 and 4200', 'plots/ccf_log_diff_2000_4200.pdf')
+plot_ccf (train_log_diff$z2800, train_log_diff$z4000, 'CCF log diff between 2800 and 4000', 'plots/ccf_log_diff_2800_4000.pdf')
+plot_ccf (train_log_diff$z2800, train_log_diff$z4200, 'CCF log diff between 2800 and 4200', 'plots/ccf_log_diff_2800_4200.pdf')
+plot_ccf (train_log_diff$z4000, train_log_diff$z4200, 'CCF log diff between 4000 and 4200', 'plots/ccf_log_diff_4000_4200.pdf')
+```
+
+
+```{r}
+train_2diff = data.frame(train)
+train_2diff = train_diff[3:dim(train_2diff)[1],]
+
+train_2diff$z2000              = diff(diff(train$z2000))
+train_2diff$z2800              = diff(diff(train$z2800))
+train_2diff$z4000              = diff(diff(train$z4000))
+train_2diff$z4200              = diff(diff(train$z4200))
+train_2diff$CPI                = diff(diff(train$CPI))
+train_2diff$obl30yr            = diff(diff(train$obl30yr))
+train_2diff$nat_tres_lend_rate = diff(diff(train$nat_tres_lend_rate))
+```
+
+```{r}
+p = ggplot(melt(train_2diff[, 1:5], id = 'Date'), aes(x = Date, y = value, colour = variable)) +
+  geom_line() +
+  labs(
+    title = 'Apartment prices for postcodes',
+    x = 'Date',
+    y = 'Price',
+    colour = 'Postcode'
+  ) + 
+  scale_x_date(date_labels = "%Y %b %d")
+
+ggsave(
+  filename = 'plots/prices_2diff.pdf',
+  device = 'pdf',
+  width = 15,
+  height = 5,
+  units = c('in'),
+)
+
+q = ggplot(melt(train_2diff[, c(1, 6:8)], id = 'Date'), aes(x = Date, y = value, colour = variable)) +
+  geom_line() +
+  labs(
+    title = 'Interest rates and CPI',
+    x = 'Date',
+    y = 'Value',
+    colour = 'Variable'
+  ) + 
+  scale_x_date(date_labels = "%Y %b %d")
+
+ggsave(
+  filename = 'plots/rates_2diff.pdf',
+  device = 'pdf',
+  width = 15,
+  height = 5,
+  units = c('in'),
+)
+
+p
+q
+```
+
+```{r}
+train_log_2diff = data.frame(train)
+train_log_2diff = train_diff[3:dim(train_log_2diff)[1],]
+
+train_log_2diff$z2000              = diff(diff(log(train$z2000)))
+train_log_2diff$z2800              = diff(diff(log(train$z2800)))
+train_log_2diff$z4000              = diff(diff(log(train$z4000)))
+train_log_2diff$z4200              = diff(diff(log(train$z4200)))
+train_log_2diff$CPI                = diff(diff(log(train$CPI)))
+train_log_2diff$obl30yr            = diff(diff(log(train$obl30yr)))
+train_log_2diff$nat_tres_lend_rate = diff(diff(log(train$nat_tres_lend_rate)))
+```
+
+```{r}
+p = ggplot(melt(train_log_2diff[, 1:5], id = 'Date'), aes(x = Date, y = value, colour = variable)) +
+  geom_line() +
+  labs(
+    title = 'Apartment prices for postcodes',
+    x = 'Date',
+    y = 'Price',
+    colour = 'Postcode'
+  ) + 
+  scale_x_date(date_labels = "%Y %b %d")
+
+ggsave(
+  filename = 'plots/prices_log_2diff.pdf',
+  device = 'pdf',
+  width = 15,
+  height = 5,
+  units = c('in'),
+)
+
+q = ggplot(melt(train_log_2diff[, c(1, 6:8)], id = 'Date'), aes(x = Date, y = value, colour = variable)) +
+  geom_line() +
+  labs(
+    title = 'Interest rates and CPI',
+    x = 'Date',
+    y = 'Value',
+    colour = 'Variable'
+  ) + 
+  scale_x_date(date_labels = "%Y %b %d")
+
+ggsave(
+  filename = 'plots/rates_log_2diff.pdf',
+  device = 'pdf',
+  width = 15,
+  height = 5,
+  units = c('in'),
+)
+
+p
+q
+```
+
+```{r}
+plot_acf (train_log_2diff$z2000,  'ACF log and diff twice for postcode 2000',  'plots/acf_log_2diff_z2000.pdf')
+plot_pacf(train_log_2diff$z2000, 'PACF log and diff twice for postcode 2000', 'plots/pacf_log_2diff_z2000.pdf')
+
+plot_acf (train_log_2diff$z2800,  'ACF log and diff twice for postcode 2800',  'plots/acf_log_2diff_z2800.pdf')
+plot_pacf(train_log_2diff$z2800, 'PACF log and diff twice for postcode 2800', 'plots/pacf_log_2diff_z2800.pdf')
+
+plot_acf (train_log_2diff$z4000,  'ACF log and diff twice for postcode 4000',  'plots/acf_log_2diff_z4000.pdf')
+plot_pacf(train_log_2diff$z4000, 'PACF log and diff twice for postcode 4000', 'plots/pacf_log_2diff_z4000.pdf')
+
+plot_acf (train_log_2diff$z4200,  'ACF log and diff twice for postcode 4200',  'plots/acf_log_2diff_z4200.pdf')
+plot_pacf(train_log_2diff$z4200, 'PACF log and diff twice for postcode 4200', 'plots/pacf_log_2diff_z4200.pdf')
+
+plot_acf (train_log_2diff$CPI,  'ACF log and diff twice for CPI',  'plots/acf_log_2diff_cpi.pdf')
+plot_pacf(train_log_2diff$CPI, 'PACF log and diff twice for CPI', 'plots/pacf_log_2diff_cpi.pdf')
+
+plot_acf (train_log_2diff$obl30yr,  'ACF log and diff twice for obl30yr',  'plots/acf_log_2diff_obl30yr.pdf')
+plot_pacf(train_log_2diff$obl30yr, 'PACF log and diff twice for obl30yr', 'plots/pacf_log_2diff_obl30yr.pdf')
+
+plot_acf (train_log_2diff$nat_tres_lend_rate,  'ACF log and diff twice for nat_tres_lend_rate',  'plots/acf_log_2diff_nat_tres_lend_rate.pdf')
+plot_pacf(train_log_2diff$nat_tres_lend_rate, 'PACF log and diff twice for nat_tres_lend_rate', 'plots/pacf_log_2diff_nat_tres_lend_rate.pdf')
+
+plot_ccf (train_log_2diff$z2000, train_2diff$z2800, 'CCF log and diff twice between 2000 and 2800', 'plots/ccf_log_2diff_2000_2800.pdf')
+plot_ccf (train_log_2diff$z2000, train_2diff$z4000, 'CCF log and diff twice between 2000 and 4000', 'plots/ccf_log_2diff_2000_4000.pdf')
+plot_ccf (train_log_2diff$z2000, train_2diff$z4200, 'CCF log and diff twice between 2000 and 4200', 'plots/ccf_log_2diff_2000_4200.pdf')
+plot_ccf (train_log_2diff$z2800, train_2diff$z4000, 'CCF log and diff twice between 2800 and 4000', 'plots/ccf_log_2diff_2800_4000.pdf')
+plot_ccf (train_log_2diff$z2800, train_2diff$z4200, 'CCF log and diff twice between 2800 and 4200', 'plots/ccf_log_2diff_2800_4200.pdf')
+plot_ccf (train_log_2diff$z4000, train_2diff$z4200, 'CCF log and diff twice between 4000 and 4200', 'plots/ccf_log_2diff_4000_4200.pdf')
+```
+
+```{r}
+transform = function(name, x) {
+  if (name == 'log') {
+      return(log(x))
+  } else if (name == 'sqrt') {
+      return(sqrt(x))
+  } else if (name == 'square') {
+      return(x^2)
+  } else if (name == 'inverse') {
+      return(1/x)
+  } else if (name == 'pass') {
+      return(x)
+  }
+}
+```
+
+```{r}
+create_arima = function(postcode, order, transformation) {
+  train_size = length(train[postcode])
+  postcode = postcode
+  
+  file_name = paste(
+    postcode,
+    paste(order, collapse=''),
+    transformation,
+    sep = '_'
+  )
+  
+  model_data = transform(
+    transformation,
+    train[postcode]
+  )
+    
+  model = arima(
+    x = model_data,
+    order = order,
+  )
+  
+  print(model)
+  print(AIC(model))
+  print(BIC(model))
+  
+  r = residuals(model)
+  
+  binom.test(
+    sum(diff(sign(r)) != 0),
+    length(r) - 1
+  )
+  
+  pdf(file = paste('plots/tsdiag_', file_name, '.pdf', sep=''))
+  tsdiag(model)
+  dev.off()
+  
+  print(plot_acf(r, file_name))
+  print(plot_pacf(r, file_name))
+  
+  pdf(file =  paste('plots/qq_plot_', file_name, '.pdf', sep=''))
+  qqPlot(r, col.lines = '#01BFC4')
+  dev.off()
+  
+  df_r = data.frame(seq(1, length(r)), r)
+  names(df_r) = c('index', 'value')
+  
+  p = ggplot(df_r) +
+    geom_point(aes(x = index, y = value), alpha = 0.3, colour = '#01BFC4', size=2) +
+    labs(
+      title = 'Residuals',
+      x = 'Index',
+      y = 'Value'
+    )
+  
+  ggsave(
+    filename =  paste('plots/residuals_', file_name, '.pdf', sep=''),
+    device = 'pdf',
+    width = 7,
+    height = 3,
+    units = c('in'),
+  )
+  
+  q = ggplot(r, aes(x = r)) + 
+    geom_histogram(aes(y = ..density..), colour = 'black', fill = 'white') +
+    geom_density(alpha = .2, fill = '#01BFC4') + 
+    labs(
+      title = 'Residuals distribution',
+      x = 'Bin',
+      y = 'Amount '
+    )
+  
+  ggsave(
+    filename = paste('plots/histogram_', file_name, '.pdf', sep=''),
+    device = 'pdf',
+    width = 7,
+    height = 3,
+    units = c('in'),
+  )
+  
+  print(p)
+  print(q)
+}
+```
+
+## Question 4.3
+
+```{r}
+create_arima(
+  'z2000',
+  c(2, 2, 1),
+  'log'
+)
+```
+```{r}
+create_arima(
+  'z2800',
+  c(1, 2, 1),
+  'log'
+)
+```
+```{r}
+create_arima(
+  'z4000',
+  c(2, 2, 2),
+  'log'
+)
+```
+
+```{r}
+create_arima(
+  'z4200',
+  c(1, 2, 2),
+  'log'
+)
+```
+
+## Question 4.4
+
+```{r}
+# Function obtained from Time Series Analysis DTU course (Fall 2021)
+step.slow <- function(object, data, penalty=2, max.iter=50){
+  ## object: A marima object
+  ## data:   The same data as given as argument when fitting 'object'
+  ## penalty: The penalty to be used
+  ## max.iter: Number of iterations before evaluating the penalty
+  # Init
+  
+  obj <- object # So that the original object is returned if no reduction is needed.
+  
+  ar.f <- object$ar.fvalues[,,-1]
+  ma.f <- object$ma.fvalues[,,-1]
+  ar.p <- object$out.ar.pattern[,,-1]
+  ma.p <- object$out.ma.pattern[,,-1]
+  ar.min <- min(ar.f[ar.f>0])
+  ma.min <- min(ma.f[ma.f>0])
+  # Now starting the actual model reduction
+  while (min(ar.min, ma.min) < penalty){
+    if (ar.min < ma.min){
+      ar.p[ar.f ==ar.min] <- FALSE
+    } else{
+      ma.p[ma.f ==ma.min] <- FALSE
+      
+    } # else
+    ## Now restimate
+    obj <- marima(data, ar.pattern = check.one(ar.p), ma.pattern = check.one(ma.p), max.iter = max.iter)
+    ar.f <- obj$ar.fvalues[,,-1]
+    ma.f <- obj$ma.fvalues[,,-1]
+    ar.p <- obj$out.ar.pattern[,,-1]
+    ma.p <- obj$out.ma.pattern[,,-1]
+    ar.min <- min(ar.f[ar.f>0])
+    ma.min <- min(ma.f[ma.f>0])
+  } # while
+  return(obj)
+}
+```
+
+### 4.4.1
+```{r}
+marima_data = data.frame(df[, 2:8])
+marima_data$z2000 = log(df$z2000)
+marima_data$z2800 = log(df$z2800)
+marima_data$z4000 = log(df$z4000)
+marima_data$z4200 = log(df$z4200)
+
+differ = matrix(c(1, 1, 2, 1, 3, 1, 4, 1, 5, 4), nrow=2)
+marima_train_diff = define.dif(marima_data[1:114,], differ)
+```
+
+```{r}
+marima_struct <- define.model(kvar=7, ar=1, ma=1, reg.var = 5:7)
+
+marima_model <- marima(
+  marima_train_diff$y.dif,
+  ar.pattern=marima_struct$ar.pattern,
+  ma.pattern=marima_struct$ma.pattern,
+  Check=F, penalty=0
+)
+
+# pdf(file = 'plots/marima_test_model.pdf')
+plot(
+  marima_model$log.det[1:50], main = 'Log of determinant of residual covariance matrix', xlab = "No. of iterations", 
+      ylab = "log(det(residual covariance matrix))", type = "l")
+grid(col = "blue")
+# dev.off()
+```
+
+```{r}
+marima_model_stepped = step.slow(marima_model, marima_train_diff$y.dif, penalty = 2 * 1.96)
+```
+
+```{r}
+# pdf(file = 'plots/marima_test_model_stepped.pdf')
+plot(
+  marima_model_stepped$log.det[1:50], main = 'Log of determinant of residual covariance matrix', xlab = "No. of iterations", 
+      ylab = "log(det(residual covariance matrix))", type = "l")
+grid(col = "blue")
+# dev.off()
+```
+
+```{r}
+marima_model_stepped
+```
+
+```{r}
+marima_train = marima_data
+marima_train[115:118, c('z2000', 'z2800', 'z4000', 'z4200')] = NA
+marima_forecast = arma.forecast(
+  marima_train, nstart=dim(marima_train)[1] - 4, nstep=4, marima=marima_model_stepped, dif.poly = marima_train_diff$dif.poly)
+```
+
+```{r}
+tail(t(exp(marima_forecast$forecasts)), 5)
+```
+
+```{r}
+forecasts = data.frame(t(marima_forecast$forecasts[1:4,]))
+
+names =       c( 'pred_z2000',  'pred_z2800',  'pred_z4000',  'pred_z4200')
+names(forecasts) = names
+lower_names = c('lower_z2000', 'lower_z2800', 'lower_z4000', 'lower_z4200')
+upper_names = c('upper_z2000', 'upper_z2800', 'upper_z4000', 'upper_z4200')
+  
+for (i in 1:4){
+  ci = marima_forecast$forecasts[i, 115:118] + cbind(rep(0, 4), -1, 1) * qnorm(0.975) * sqrt(marima_forecast$pred.var[i, i,])
+  forecasts[, lower_names[i]] = exp(c(forecasts[1:114, names[i]], ci[,2]))
+  forecasts[, upper_names[i]] = exp(c(forecasts[1:114, names[i]], ci[,3]))
+  forecasts[, names[i]] = exp(forecasts[, names[i]])
+}
+
+forecasts$Date = df$Date
+forecasts$z2000 = df$z2000
+forecasts$z2800 = df$z2800
+forecasts$z4000 = df$z4000
+forecasts$z4200 = df$z4200
+
+tail(forecasts, 4)
+```
+
+```{r}
+p = ggplot(forecasts) +
+  geom_line(aes(x = Date, y = z2000,      color='True z2000')) +
+  geom_line(aes(x = Date, y = pred_z2000, color='Pred z2000')) +
+  geom_ribbon(aes(x = Date, y = pred_z2000, ymin = lower_z2000, ymax = upper_z2000), alpha = 0.3) +
+  
+  geom_line(aes(x = Date, y = z2800,      color='True z2800')) +
+  geom_line(aes(x = Date, y = pred_z2800, color='Pred z2800')) +
+  geom_ribbon(aes(x = Date, y = pred_z2800, ymin = lower_z2800, ymax = upper_z2800), alpha = 0.3) +
+  
+  geom_line(aes(x = Date, y = z4000,      color='True z4000')) +
+  geom_line(aes(x = Date, y = pred_z4000, color='Pred z4000')) +
+  geom_ribbon(aes(x = Date, y = pred_z4000, ymin = lower_z4000, ymax = upper_z4000), alpha = 0.3) +
+  
+  geom_line(aes(x = Date, y = z4200,      color='True z4200')) +
+  geom_line(aes(x = Date, y = pred_z4200, color='Pred z4200')) +
+  geom_ribbon(aes(x = Date, y = pred_z4200, ymin = lower_z4200, ymax = upper_z4200), alpha = 0.3) +
+
+  labs(
+    title = 'Predictions',
+    x = 'Date',
+    y = 'Price',
+    colour = 'Postcode'
+  ) + 
+  scale_x_date(date_labels = "%Y %b %d")
+
+ggsave(
+  filename = 'plots/predictions_test.pdf',
+  device = 'pdf',
+  width = 15,
+  height = 5,
+  units = c('in'),
+)
+
+p
+```
+
+```{r}
+marima_full_diff = define.dif(marima_data, differ)
+
+marima_model_full <- marima(
+  marima_full_diff$y.dif,
+  ar.pattern=marima_struct$ar.pattern,
+  ma.pattern=marima_struct$ma.pattern,
+  Check=F, penalty=0
+)
+
+# pdf(file = 'plots/marima_full_model.pdf')
+plot(
+  marima_model_full$log.det[1:50], main = 'Log of determinant of residual covariance matrix', xlab = "No. of iterations", 
+      ylab = "log(det(residual covariance matrix))", type = "l")
+    grid(col = "blue")
+# dev.off()
+```
+
+```{r}
+marima_model_full_stepped = step.slow(marima_model_full, marima_full_diff$y.dif, penalty = 2 * 1.96)
+```
+
+```{r}
+# pdf(file = 'plots/marima_full_model_stepped.pdf')
+plot(
+  marima_model_full_stepped$log.det[1:50], main = 'Log of determinant of residual covariance matrix', xlab = "No. of iterations", 
+      ylab = "log(det(residual covariance matrix))", type = "l")
+    grid(col = "blue")
+# dev.off()
+```
+
+```{r}
+marima_model_full_stepped
+```
+
+```{r}
+marima_future_data = marima_data
+marima_future_data[119:122,] = rep(NA, 7)
+
+marima_future_forecast = arma.forecast(
+  marima_future_data, nstart=dim(marima_future_data)[1] - 4, nstep=4, marima=marima_model_full_stepped, dif.poly = marima_full_diff$dif.poly)
+
+tail(t(exp(marima_forecast$forecasts)), 5)
+```
+
+```{r}
+forecasts = data.frame(t(marima_future_forecast$forecasts[1:4,]))
+
+names =       c( 'pred_z2000',  'pred_z2800',  'pred_z4000',  'pred_z4200')
+names(forecasts) = names
+lower_names = c('lower_z2000', 'lower_z2800', 'lower_z4000', 'lower_z4200')
+upper_names = c('upper_z2000', 'upper_z2800', 'upper_z4000', 'upper_z4200')
+  
+for (i in 1:4){
+  ci = marima_future_forecast$forecasts[i, 119:122] + cbind(rep(0, 4), -1, 1) * qnorm(0.975) * sqrt(marima_future_forecast$pred.var[i, i,])
+  forecasts[, lower_names[i]] = exp(c(forecasts[1:118, names[i]], ci[,2]))
+  forecasts[, upper_names[i]] = exp(c(forecasts[1:118, names[i]], ci[,3]))
+  forecasts[, names[i]] = exp(forecasts[, names[i]])
+}
+
+forecasts$Date = c(df$Date, seq(ISOdate(2021, 7, 1), by = 'quarter', length.out = 4))
+forecasts$z2000 = c(df$z2000, rep(NA, 4))
+forecasts$z2800 = c(df$z2800, rep(NA, 4))
+forecasts$z4000 = c(df$z4000, rep(NA, 4))
+forecasts$z4200 = c(df$z4200, rep(NA, 4))
+
+tail(forecasts, 4)
+```
+
+```{r}
+p = ggplot(forecasts) +
+  geom_line(aes(x = Date, y = z2000,      color='True z2000')) +
+  geom_line(aes(x = Date, y = pred_z2000, color='Pred z2000')) +
+  geom_ribbon(aes(x = Date, y = pred_z2000, ymin = lower_z2000, ymax = upper_z2000), alpha = 0.3) +
+  
+  geom_line(aes(x = Date, y = z2800,      color='True z2800')) +
+  geom_line(aes(x = Date, y = pred_z2800, color='Pred z2800')) +
+  geom_ribbon(aes(x = Date, y = pred_z2800, ymin = lower_z2800, ymax = upper_z2800), alpha = 0.3) +
+  
+  geom_line(aes(x = Date, y = z4000,      color='True z4000')) +
+  geom_line(aes(x = Date, y = pred_z4000, color='Pred z4000')) +
+  geom_ribbon(aes(x = Date, y = pred_z4000, ymin = lower_z4000, ymax = upper_z4000), alpha = 0.3) +
+  
+  geom_line(aes(x = Date, y = z4200,      color='True z4200')) +
+  geom_line(aes(x = Date, y = pred_z4200, color='Pred z4200')) +
+  geom_ribbon(aes(x = Date, y = pred_z4200, ymin = lower_z4200, ymax = upper_z4200), alpha = 0.3) +
+
+  labs(
+    title = 'Predictions',
+    x = 'Date',
+    y = 'Price',
+    colour = 'Postcode'
+  ) + 
+  scale_x_date(date_labels = "%Y %b %d")
+
+ggsave(
+  filename = 'plots/predictions_future.pdf',
+  device = 'pdf',
+  width = 15,
+  height = 5,
+  units = c('in'),
+)
+
+p
+```
+
+
+
+
